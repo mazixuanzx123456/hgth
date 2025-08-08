@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>躲避猫掌 App版</title>
+<style>
+  html, body {
+    margin:0; padding:0; height:100%; width:100%; overflow:hidden; -webkit-user-select:none; -webkit-touch-callout:none;
+    background: #f0f0f0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #gameCanvas {
+    display: block; margin: 0 auto; background: white; border: 4px solid #333;
+    touch-action: none;
+  }
+  #ui {
+    position: fixed; top: 10px; left: 10px; color: #000; z-index: 100;
+  }
+  #ui span {
+    margin-right: 15px;
+  }
+  #props {
+    position: fixed; top: 80px; left: 10px; z-index: 100;
+  }
+  #props button {
+    margin: 3px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 16px;
+  }
+  body.night {
+    background: #111;
+    color: #eee;
+  }
+  body.night #ui {
+    color: #eee;
+  }
+  #gameOverScreen {
+    display: none;
+    position: fixed;
+    top: 30%; left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    border: 2px solid #000;
+    padding: 20px;
+    text-align: center;
+    z-index: 200;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    border-radius: 8px;
+    color: #000;
+    width: 80vw;
+    max-width: 300px;
+  }
+  body.night #gameOverScreen {
+    background: #222;
+    color: #eee;
+    border-color: #555;
+  }
+  #gameOverScreen button {
+    margin-top: 15px;
+    padding: 8px 16px;
+    font-size: 18px;
+    cursor: pointer;
+    width: 100%;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="400" height="600" style="max-width:100vw; max-height:100vh;"></canvas>
+
+<div id="ui">
+  <span id="score">积分: 0</span>
+  <span id="highscore">最高分: 0</span><br/>
+  <button id="skinBtn">切换皮肤</button>
+  <button id="nightBtn">夜间模式</button>
+  <button id="musicBtn">音乐开/关</button>
+</div>
+
+<div id="props">
+  <button id="slowTimeBtn">时间变慢道具</button>
+  <button id="invincibleBtn">无敌道具</button>
+  <button id="clearScreenBtn">清屏道具</button>
+  <button id="smallMouseBtn">老鼠变小道具</button>
+  <br/>
+  <span>时间变慢库存: <span id="slowTimeCount">3</span></span><br/>
+  <span>无敌库存: <span id="invincibleCount">3</span></span><br/>
+  <span>清屏库存: <span id="clearScreenCount">3</span></span><br/>
+  <span>老鼠变小库存: <span id="smallMouseCount">3</span></span>
+</div>
+
+<div id="gameOverScreen">
+  <h2>游戏结束！</h2>
+  <p id="finalScoreText">你的得分：0</p>
+  <button id="restartBtn">重新开始</button>
+</div>
+
+<audio id="bgMusic" loop>
+  <source src="https://cdn.pixabay.com/audio/2022/03/02/audio_2d349e56ca.mp3" type="audio/mp3" />
+</audio>
+<audio id="hitSound">
+  <source src="https://cdn.pixabay.com/audio/2022/03/15/audio_f5a500ca69.mp3" type="audio/mp3" />
+</audio>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const bgMusic = document.getElementById('bgMusic');
+  const hitSound = document.getElementById('hitSound');
+
+  const scoreEl = document.getElementById('score');
+  const highscoreEl = document.getElementById('highscore');
+  const skinBtn = document.getElementById('skinBtn');
+  const nightBtn = document.getElementById('nightBtn');
+  const musicBtn = document.getElementById('musicBtn');
+
+  const slowTimeBtn = document.getElementById('slowTimeBtn');
+  const invincibleBtn = document.getElementById('invincibleBtn');
+  const clearScreenBtn = document.getElementById('clearScreenBtn');
+  const smallMouseBtn = document.getElementById('smallMouseBtn');
+
+  const slowTimeCountEl = document.getElementById('slowTimeCount');
+  const invincibleCountEl = document.getElementById('invincibleCount');
+  const clearScreenCountEl = document.getElementById('clearScreenCount');
+  const smallMouseCountEl = document.getElementById('smallMouseCount');
+
+  const gameOverScreen = document.getElementById('gameOverScreen');
+  const finalScoreText = document.getElementById('finalScoreText');
+  const restartBtn = document.getElementById('restartBtn');
+
+  let score = 0;
+  let highscore = localStorage.getItem('highscore') || 0;
+  let skins = ['🐭', '🐹', '🐰', '🐸'];
+  let skinIndex = 0;
+
+  let drops = [];
+  let player = {x: 200, y: 550, size: 40};
+
+  let gameRunning = false;
+  let gamePaused = false;
+
+  let slowTimeCount = 3;
+  let invincibleCount = 3;
+  let clearScreenCount = 3;
+  let smallMouseCount = 3;
+
+  let slowTime = false;
+  let slowTimeTimer = 0;
+  let invincible = false;
+  let invincibleTimer = 0;
+  let smallMouse = false;
+  let smallMouseTimer = 0;
+
+  const normalPlayerSize = 40;
+  const smallPlayerSize = 25;
+
+  function updateUI() {
+    scoreEl.textContent = `积分: ${score}`;
+    highscoreEl.textContent = `最高分: ${highscore}`;
+    slowTimeCountEl.textContent = slowTimeCount;
+    invincibleCountEl.textContent = invincibleCount;
+    clearScreenCountEl.textContent = clearScreenCount;
+    smallMouseCountEl.textContent = smallMouseCount;
+  }
+
+  function drawPlayer() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (invincible) {
+      // 闪烁效果，最后3秒闪烁
+      if (invincibleTimer > 180 || (Math.floor(invincibleTimer / 15) % 2 === 0)) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'gold';
+        ctx.lineWidth = 5;
+        ctx.arc(player.x, player.y - player.size / 2, player.size * 0.7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.font = `${player.size}px serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(skins[skinIndex], player.x, player.y);
+    drawDrops();
+  }
+
+  function drawDrops() {
+    ctx.font = "30px serif";
+    drops.forEach(p => ctx.fillText("🐾", p.x, p.y));
+  }
+
+  function updateDrops() {
+    let speed = slowTime ? 2 : 4;
+    drops.forEach(p => p.y += speed);
+    drops = drops.filter(p => p.y < canvas.height);
+  }
+
+  function checkCollision(a, b) {
+    return !(a.x + a.size < b.x || a.x > b.x + 30 || a.y + a.size < b.y || a.y > b.y + 30);
+  }
+
+  function update() {
+    updateDrops();
+    for (let p of drops) {
+      if (checkCollision(player, p)) {
+        if (!invincible) {
+          hitSound.play();
+          endGame();
+          return;
+        }
+      }
+    }
+  }
+
+  function gameLoop() {
+    if (!gameRunning || gamePaused) return;
+
+    if (slowTimeTimer > 0) {
+      slowTimeTimer--;
+      if (slowTimeTimer === 0) slowTime = false;
+    }
+    if (invincibleTimer > 0) {
+      invincibleTimer--;
+      if (invincibleTimer === 0) invincible = false;
+    }
+    if (smallMouseTimer > 0) {
+      smallMouseTimer--;
+      if (smallMouseTimer === 0) {
+        smallMouse = false;
+        player.size = normalPlayerSize;
+      }
+    }
+
+    update();
+    drawPlayer();
+  }
+
+  function startGame() {
+    score = 0;
+    drops = [];
+    player.x = canvas.width / 2;
+    player.size = normalPlayerSize;
+    skinIndex = 0;
+    gameRunning = true;
+    gamePaused = false;
+    slowTime = false; slowTimeTimer = 0;
+    invincible = false; invincibleTimer = 0;
+    smallMouse = false; smallMouseTimer = 0;
+    bgMusic.play();
+    updateUI();
+  }
+
+  function endGame() {
+    gameRunning = false;
+    gamePaused = true;
+    bgMusic.pause();
+    if (score > highscore) {
+      highscore = score;
+      localStorage.setItem('highscore', highscore);
+    }
+    finalScoreText.textContent = `你的得分：${score}`;
+    gameOverScreen.style.display = 'block';
+  }
+
+  restartBtn.onclick = () => {
+    gameOverScreen.style.display = 'none';
+    startGame();
+  };
+
+  skinBtn.onclick = () => {
+    skinIndex = (skinIndex + 1) % skins.length;
+  };
+
+  nightBtn.onclick = () => {
+    document.body.classList.toggle('night');
+  };
+
+  musicBtn.onclick = () => {
+    if (bgMusic.paused) bgMusic.play();
+    else bgMusic.pause();
+  };
+
+  function useSlowTime() {
+    if (slowTimeCount <= 0) return alert('时间变慢道具库存不足');
+    if (!gameRunning || gamePaused) return alert('游戏未开始');
+    slowTime = true;
+    slowTimeTimer = 300;
+    slowTimeCount--;
+    updateUI();
+  }
+
+  function useInvincible() {
+    if (invincibleCount <= 0) return alert('无敌道具库存不足');
+    if (!gameRunning || gamePaused) return alert('游戏未开始');
+    invincible = true;
+    invincibleTimer = 300;
+    invincibleCount--;
+    updateUI();
+  }
+
+  function useClearScreen() {
+    if (clearScreenCount <= 0) return alert('清屏道具库存不足');
+    if (!gameRunning || gamePaused) return alert('游戏未开始');
+    drops = [];
+    clearScreenCount--;
+    updateUI();
+  }
+
+  function useSmallMouse() {
+    if (smallMouseCount <= 0) return alert('老鼠变小道具库存不足');
+    if (!gameRunning || gamePaused) return alert('游戏未开始');
+    smallMouse = true;
+    smallMouseTimer = 300;
+    player.size = smallPlayerSize;
+    smallMouseCount--;
+    updateUI();
+  }
+
+  slowTimeBtn.onclick = useSlowTime;
+  invincibleBtn.onclick = useInvincible;
+  clearScreenBtn.onclick = useClearScreen;
+  smallMouseBtn.onclick = useSmallMouse;
+
+  // 触摸左右滑动控制（适合手机）
+  let startX = null;
+  canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) startX = e.touches[0].clientX;
+  });
+  canvas.addEventListener('touchmove', e => {
+    if (!gameRunning || gamePaused) return;
+    if (e.touches.length !== 1) return;
+    const currentX = e.touches[0].clientX;
+    const diff = currentX - startX;
+    if (Math.abs(diff) > 15) {
+      if (diff > 0) player.x = Math.min(player.x + 20, canvas.width - 20);
+      else player.x = Math.max(player.x - 20, 20);
+      startX = currentX;
+    }
+  });
+
+  // 键盘控制兼容
+  document.addEventListener('keydown', e => {
+    if (!gameRunning || gamePaused) return;
+    if (e.key === 'ArrowLeft') player.x = Math.max(player.x - 20, 20);
+    if (e.key === 'ArrowRight') player.x = Math.min(player.x + 20, canvas.width - 20);
+  });
+
+  setInterval(() => {
+    if (gameRunning && !gamePaused) {
+      drops.push({ x: Math.random() * (canvas.width - 30), y: 0 });
+    }
+  }, 800);
+
+  setInterval(() => {
+    if (gameRunning && !gamePaused) {
+      score++;
+      updateUI();
+    }
+  }, 1000);
+
+  setInterval(gameLoop, 1000 / 60);
+
+  startGame();
+  bgMusic.volume = 0.5;
+})();
+</script>
+
+</body>
+</html>
